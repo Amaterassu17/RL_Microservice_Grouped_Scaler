@@ -1,0 +1,45 @@
+- upstream_store_dir: "$${kameleon_cwd}/upstream_build/"
+- upstream_tarball: ""
+- upstream_recipe: ""
+- upstream_version: ""
+- upstream_checksum: ""
+- upstream_checksign: ""
+- upstream_cache: ""
+- upstream_url: ""
+- grid5000_environment_import_name: ""
+- grid5000_environment_import_user: ""
+- grid5000_environment_import_version: ""
+- grid5000_environment_import_arch: "x86_64"
+- grid5000_frontend: ""
+
+- download:
+  - on_bootstrap_clean:
+    - exec_local: rm -rf $${upstream_store_dir}
+  - test:
+    - exec_local: test -n "$${upstream_tarball}"
+    - group:
+      - exec_local: echo "Download tarball..."
+      - download_file_local:
+        - $${upstream_url}/$${upstream_tarball}
+        - $${upstream_store_dir}/$${upstream_tarball}
+      - exec_local: export UPSTREAM_TARBALL="$${upstream_store_dir}/$${upstream_tarball}"
+    - test:
+      - exec_local: test -n "$${upstream_recipe}"
+      - download_recipe_build_local:
+        - $${upstream_recipe}
+        - $${upstream_version}
+        - $${upstream_checksum}
+        - $${upstream_checksign}
+        - $${upstream_cache}
+        - $${upstream_url}
+        - $${upstream_store_dir}
+      - test:
+        - exec_local: test -n "$${grid5000_environment_import_name}"
+        - download_grid5000_image_local:
+          - $${grid5000_environment_import_name}
+          - $${grid5000_environment_import_user}
+          - $${grid5000_environment_import_version}
+          - $${grid5000_environment_import_arch}
+          - $${grid5000_frontend}
+          - $${upstream_store_dir}
+        - exec_local: fail "Nothing to download ???"

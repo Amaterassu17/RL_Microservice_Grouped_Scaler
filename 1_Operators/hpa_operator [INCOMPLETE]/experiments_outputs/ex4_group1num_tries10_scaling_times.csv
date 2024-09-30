@@ -1,0 +1,6 @@
+Microservice | Replicas,AvgTime, MinTime, MaxTime
+teastore-persistence| R1,0.0,0,0
+teastore-persistence| R2,0.0,0,0
+teastore-persistence| R5,0.0,0,0
+teastore-persistence| R10,0.0,0,0
+teastore-persistence| R20,0.0,0,0

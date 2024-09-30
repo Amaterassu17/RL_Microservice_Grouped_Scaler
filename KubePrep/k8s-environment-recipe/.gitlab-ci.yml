@@ -1,0 +1,162 @@
+variables:
+  G5K_ENV_NAME: "debian11-min"
+  G5K_ENV_VERSION: "2024012509"
+
+include:
+  - project: 'alpetit/ci-templates'
+    ref: main
+    file: 'grid5000.yml'
+
+stages:
+  - validate
+  - build
+  - test
+  - prepare
+  - release
+  - changelog
+  - deploy
+
+dryrun:
+  stage: validate
+  tags:
+    - ci.inria.fr
+    - small
+    - linux
+  image: ${CI_REGISTRY}/alpetit/docker-images/kameleon:2.10.11.1-bullseye
+  script:
+    - kameleon build --dryrun debian-k8s.yaml
+
+build:
+  extends: .provision-g5k-nodes
+  variables:
+    WALLTIME: '0:04'
+  stage: build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+  tags:
+   - g5k
+   - grenoble
+  script:
+   - |
+     oarsh $NODE "
+        # To fix issue with XDG_RUNTIME_DIR env variable
+        # see https://intranet.grid5000.fr/bugzilla/show_bug.cgi?id=15025
+        source /etc/profile
+
+        # Makes the server print the executed commands to stdout.
+        # Makes the execution stop when one of the commands fails.
+        set -x -e
+
+        cd $CI_PROJECT_DIR
+        mkdir -p artifacts
+        # If it is a scheduled pipeline use the lastest G5K environment. Otherwise,
+        # retrive the G5K environment and set the kubeadm as specified in the tag.
+        if [ $CI_PIPELINE_SOURCE = "schedule" ]; then
+          kameleon build --global grid5000_environment_export_dir:$CI_PROJECT_DIR/artifacts grid5000_environment_import_name:$G5K_ENV_NAME debian-k8s.yaml
+        else
+          kameleon build --global grid5000_environment_export_dir:$CI_PROJECT_DIR/artifacts grid5000_environment_import_version:$G5K_ENV_VERSION grid5000_environment_export_baseurl:http://public.grenoble.grid5000.fr/~$USER/ debian-k8s.yaml
+        fi
+      "
+  artifacts:
+    paths:
+      - artifacts/*
+    expire_in: 1 week
+
+
+test:
+  extends: .provision-g5k-nodes
+  variables:
+    WALLTIME: '0:07'
+    TYPE: 'deploy'
+    NODES: 2
+  stage: test
+  dependencies:
+    - build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+  tags:
+    - g5k
+    - grenoble
+  script:
+    - cp artifacts/$G5K_ENV_NAME-k8s.dsc artifacts/$G5K_ENV_NAME-k8s-$CI_PIPELINE_ID.dsc
+    - 'sed -i s"|\(  file: \).*$|\1local://$(pwd)/$(find artifacts -type f -name $G5K_ENV_NAME-k8s*.tar.zst)|" artifacts/$G5K_ENV_NAME-k8s-$CI_PIPELINE_ID.dsc'
+    - 'sed -i s"|\(- archive: \)[[:alnum:]:/_-]*/\([[:alnum:]_-]*-k8s-disable-swap.tar.gz\)$|\1local://$(pwd)/artifacts/\2|" artifacts/$G5K_ENV_NAME-k8s-$CI_PIPELINE_ID.dsc'
+    - kadeploy3 -f /var/lib/oar/$OAR_JOB_ID -a artifacts/$G5K_ENV_NAME-k8s-$CI_PIPELINE_ID.dsc
+    - JOIN_CMD=$(ssh $FIRST_NODE -l root 'kubeadm init' | grep -A 1 'kubeadm join')
+    - ssh $FIRST_NODE -l root 'KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml'
+    - ssh $LAST_NODE -l root "$JOIN_CMD"
+    - sleep 15
+    - ssh $FIRST_NODE -l root "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes" | grep -v -q -c 'NotReady'
+
+prepare_release_notes:
+  stage: prepare
+  tags:
+    - ci.inria.fr
+    - small
+    - linux
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+      when: manual
+      allow_failure: false
+  script:
+    - apk add curl jq
+    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=$CI_COMMIT_TAG" | jq -r .notes > release_notes.md'
+  artifacts:
+    paths:
+    - release_notes.md
+
+generate_release:
+  stage: release
+  tags:
+    - ci.inria.fr
+    - small
+    - linux
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: prepare_release_notes
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+  script:
+    - echo "Creating release"
+  release:
+    name: 'Release $CI_COMMIT_TAG'
+    description: release_notes.md
+    tag_name: '$CI_COMMIT_TAG'
+    ref: '$CI_COMMIT_SHA'
+
+update_changelog:
+  stage: changelog
+  tags:
+    - ci.inria.fr
+    - small
+    - linux
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+  script:
+    - apk add curl jq
+    - 'curl -H "PRIVATE-TOKEN: $CUSTOM_CI_API_TOKEN" --data "message=Add changelog for version $CI_COMMIT_TAG [ci skip]" -X POST "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=$CI_COMMIT_TAG"'
+
+push:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+$/'
+  needs:
+    - job: build
+      artifacts: true
+    - job: update_changelog
+  tags:
+   - g5k
+   - grenoble
+  script:
+    - cp artifacts/* ~/public/
+    - |
+      set -x -e
+      for site in grenoble lille luxembourg lyon nancy nantes rennes sophia toulouse; do
+        ssh $site "kaenv3 -a http://public.grenoble.grid5000.fr/~apetit/$G5K_ENV_NAME-k8s.dsc"
+      done
+

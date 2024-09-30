@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gen
+spec:
+  selector:
+    matchLabels:
+      app: gens
+      run: gen
+  template:
+    metadata:
+      labels:
+        app: gens
+        run: gen
+    spec:
+      volumes:
+        - name: metrics
+          hostPath:
+            path: /home/ggrabher/share/
+      containers:
+        - name: gen
+          image: debian:bullseye
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: HOST_NAME
+              value: "gen"
+          volumeMounts:
+          - name: metrics
+            mountPath: /home/ggrabher/share/
+          args:
+          - tail 
+          - -f 
+          - "/dev/null"
+      tolerations:
+      - key: "gens"
+        operator: "Equal"
+        value: "yes"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gen
+  labels:
+    app: gens
+    run: gen
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      nodePort: 30000
+      protocol: TCP
+  selector:
+    run: gen

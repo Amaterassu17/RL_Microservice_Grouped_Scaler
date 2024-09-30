@@ -1,0 +1,52 @@
+#==============================================================================
+# vim: softtabstop=2 shiftwidth=2 expandtab fenc=utf-8 cc=81 tw=80
+#==============================================================================
+#
+# DESCRIPTION: Recipe to build an environment containing preinstalled
+# kubernetes tools: containerd.io, kubeadm, ...
+#
+# This environement is build on top of existing pre-built Grid'5000
+# environment supported by the Grid'5000 technical team.
+---
+extend: grid5000/from_grid5000_environment/base.yaml
+
+global:
+  ## Environment to build from
+  grid5000_environment_import_name: "debian11-min"
+  #grid5000_environment_import_version: ""
+
+  ## New environment description
+  grid5000_environment_export_name: "$${grid5000_environment_import_name}-k8s"
+  grid5000_environment_export_description: "Kubernetes environment (kubeadm=$${KUBEADM_VERSION},containerd=$${CONTAINERD_VERSION}) built from $${grid5000_environment_import_name}"
+  #grid5000_environment_export_baseurl: "http://public.grenoble.grid5000.fr/~$USER/"
+  grid5000_environment_export_visibility: "private"
+  #grid5000_environment_export_version: "128"
+  appliance_filename: "$${grid5000_environment_export_name}-$(date +%Y%m%d%H)"
+
+  ## Create additional postinstall to disable swap
+  grid5000_environment_export_additional_postinstall_archive: "$${grid5000_environment_export_name}-disable-swap.tar.gz"
+  grid5000_environment_export_additional_postinstall_script: "disable_swap.sh"
+  grid5000_environment_export_additional_postinstall_dir: "additional_postinstall"
+  ## 'systemd.gpt_auto=no' disable systemd automount swap partition mechanism
+  grid5000_environment_export_boot_kernel_params: "modprobe.blacklist=nouveau systemd.gpt_auto=no"
+
+
+  DOCKER_VERSION: 5:24.0.6-1~debian.11~bullseye
+  CONTAINERD_VERSION: 1.6.28-1
+  KUBEADM_VERSION: 1.29
+  HELM_VERSION: v3.14.1
+
+bootstrap:
+  - "@base"
+
+setup:
+# - install_docker
+  - install_containerd
+  - install_kubeadm
+  - install_helm
+  - install_extra
+  - disable_swap
+  - clean_system
+
+export:
+  - "@base"

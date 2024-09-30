@@ -1,0 +1,8 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v1.16.0
+apiServer:
+  extraArgs:
+    enable-aggregator-routing=true
+    enable-admission-plugins=NodeRestriction,MutatingAdmissionWebhook
+    runtime-config=admissionregistration.k8s.io/v1beta1=true

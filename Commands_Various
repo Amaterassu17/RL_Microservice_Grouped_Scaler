@@ -1,0 +1,700 @@
+
+x=2
+nodes="chifflot"
+oarsub -I -t deploy -l nodes=$x,walltime=3:30 -p $nodes
+kadeploy3 debian11-kube -f $OAR_FILE_NODES -k ~/.ssh/id_rsa.pub
+cd /home/agennuso/Boh/KubePrep/kube_cluster_prep
+./prepare.sh 
+./post_install.sh
+chmod +x ./kube_setup_tools.sh
+./kube_setup_tools.sh
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+cat $OAR_FILE_NODES | uniq > nodes.txt
+
+#to setup docker cache
+sed -i -z 's|\(    \[plugins."io.containerd.grpc.v1.cri".registry\]\n      config_path = \)""|\1"/etc/containerd/certs.d"|g' /etc/containerd/config.toml
+mkdir -p /etc/containerd/certs.d/docker.io
+printf 'server = "https://registry-1.docker.io"\nhost."http://docker-cache.grid5000.fr".capabilities = ["pull", "resolve"]\n' | tee /etc/containerd/certs.d/docker.io/hosts.toml
+systemctl restart containerd
+
+export CONTROL=x.lille.grid5000.fr #chiclet, chifflot...
+export WORKER1="y.lille.grid5000.fr"
+export WORKER2="z.lille.grid5000.fr"
+export NODES="$(cat $OAR_FILE_NODES | uniq)"
+
+#!/bin/bash
+
+# Assuming your environment variable containing node names is called NODES
+# You can replace "NODES" with the actual name of your environment variable
+
+            #!/bin/bash
+
+# Assuming your environment variable containing node names is called NODES
+# You can replace "NODES" with the actual name of your environment variable
+                
+                export NODES="$(cat $OAR_FILE_NODES | uniq)"
+                nodes=$NODES
+                echo nodes
+                # Split the nodes into an array using space as delimiter
+                string="chifflot-2.lille.grid5000.fr chifflot-4.lille.grid5000.fr"
+                read -r -a node_array <<< "$string"
+
+                # Set CONTROL to the first node
+                CONTROL="${node_array[0]}"
+                export CONTROL
+
+
+                
+
+
+                counter=0
+                for element in "${nodes}"; do
+                if [[ $counter -eq 0 ]]
+                then
+                    echo CONTROL="$element"
+                else
+                    echo WORKER$counter="$element"
+                fi
+                ((counter++))
+                done
+
+
+
+
+
+                # Print out the values to verify
+                CONTROL=$(head -n 1 $OAR_NODEFILE)
+                NODE=$(head -n 1 $OAR_NODEFILE)
+                WORKERS=$(tail -n +2 $OAR_NODEFILE | awk '!seen[$0]++' | grep -v "$NODE")
+                
+                NUM_WORKERS=$(echo "$WORKERS" | wc -l)
+                for i in $(seq 1 $NUM_WORKERS); do
+                    export WORKER_$i=$(echo "$WORKERS" | sed -n "${i}p")
+                done
+                echo "$NODE + $WORKER_1"
+                export NODES="$(cat $OAR_FILE_NODES | uniq)"
+                i=0
+                for((i = 0; i < $(wc -w <<<"$NODES"); i++ )); do
+                    echo $i
+                    if [ "$i" == 0 ]; then
+                        echo "$i ciao"
+                        ssh root@$CONTROL 'bash -s' < /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_init_control.sh
+                        sleep(1)
+                    else
+                        echo "$i"
+                        eval "WORKER=\$WORKER_$i"
+                        ssh root@$WORKER 'chmod +x /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_token.sh'
+                        ssh root@$WORKER 'bash -s' < /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_token.sh
+                    fi
+                done        
+
+                
+                
+                ssh root@$CONTROL 'chmod +x /home/agennuso/Boh/Istio_Mesh/install_istio_normal.sh'
+                ssh root@$CONTROL 'bash -s' < /home/agennuso/Boh/Istio_Mesh/install_istio_normal.sh
+
+
+
+CONTROL=$(head -n 1 $OAR_NODEFILE)
+NODE=$(head -n 1 $OAR_NODEFILE)
+WORKERS=$(tail -n +2 $OAR_NODEFILE | awk '!seen[$0]++' | grep -v "$NODE")
+
+NUM_WORKERS=$(echo "$WORKERS" | wc -l)
+
+# Create an array to store worker nodes
+WORKER_NODES=()
+for i in $(seq 1 $NUM_WORKERS); do
+    WORKER_NODES+=($(echo "$WORKERS" | sed -n "${i}p"))
+done
+
+echo "$NODE + ${WORKER_NODES[0]}" # Just for debugging
+
+export NODES="$(cat $OAR_FILE_NODES | uniq)"
+for ((i = 0; i < $(wc -w <<<"$NODES"); i++ )); do
+    if [ "$i" == 0 ]; then
+        echo "$i ciao"
+        ssh root@$CONTROL 'bash -s' < /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_init_control.sh
+        sleep 1 # corrected syntax for sleep
+    else
+        echo "$i"
+        ssh root@${WORKER_NODES[i-1]} 'chmod +x /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_token.sh'
+        ssh root@${WORKER_NODES[i-1]} 'bash -s' < /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_token.sh
+    fi
+done
+
+ssh root@$CONTROL 'kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml'
+ssh root@$CONTROL 'kubectl apply -f /home/agennuso/Boh/MetricsPrep/metric_server_components.yaml'
+sleep(3)
+ssh root@$CONTROL 'chmod +x /home/agennuso/Boh/MetricsPrep/install_stack.sh'
+ssh root@$CONTROL 'bash -s' < /home/agennuso/Boh/MetricsPrep/install_stack.sh
+
+
+
+
+
+
+
+
+
+
+
+#SPLIT TERMINALS
+#ON MASTER
+ssh root@$CONTROL -l root
+
+
+cd /home/agennuso/Boh/KubePrep/kube_cluster_prep
+kubeadm init --config kubeadm-config.yaml
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+kubeadm token create --print-join-command > /home/agennuso/Boh/KubePrep/kube_cluster_prep/kubeadm_token.sh
+
+
+
+#On WORKER S
+ssh root@$WORKER1 -l root
+cd /home/agennuso/kube_cluster_prep
+kubeadm join xxx #from result of kubeadm init
+
+#on master
+kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml
+watch kubectl get nodes
+
+#control if every node is ready
+
+#On WORKER S
+# export KUBECONFIG=/home/agennuso/.kube/config
+# kubectl get nodes
+
+
+#ISTIO optional
+
+#deployMETRICSERVER, PROMETHEUS, GRAFANA
+#do we really need METRIC SER?
+#
+#METRIC SERVER
+#masterplane
+nano /etc/kubernetes/manifests/kube-apiserver.yaml
+#modify by adding the sequent flag
+    - --enable-aggregator-routing=true
+    sudo systemctl restart kubelet.service
+
+    kubectl apply -f /home/agennuso/Boh/MetricsPrep/metric_server_components.yaml
+    #add again in the api 
+    --MutatingAdmissionWebhook in enable-admisison-plugins
+    - --runtime-config=admissionregistration.k8s.io/v1beta1=true
+
+    #could be useful to do
+    kubectl get apiservices
+
+
+    #is api server working correctly? N O
+    #to make it easy..
+   
+
+
+    sudo systemctl restart kubelet.service
+    sleep 3
+    kubectl apply -f /home/agennuso/Boh/MetricsPrep/metric_server_components.yaml
+
+
+#Take endpoint of metrics server to put into Prometheus
+kubectl get services -n kube-system
+export METRICS_SERVER_ENDPOINT=$(kubectl describe services metrics-server -n kube-system | grep Endpoints: |  grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b:[0-9]{1,5}")
+echo $METRICS_SERVER_ENDPOINT
+#go modify the reccomender with Prometheus IP and the Prometheus configuration before installing it on the helm chart value in Prometheus/.../helm_values_prometheus.yaml
+
+#installing prometheus with this
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+kubectl create namespace monitoring
+
+
+#stack commands
+kubectl create namespace monitoring
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install -f /home/agennuso/Boh/MetricsPrep/helm_values_stack.yaml prometheus prometheus-community/kube-prometheus-stack
+export GRAFANA_SERVICE=$(kubectl get services -n default | grep grafana | awk '{print $1}')
+kubectl patch svc $GRAFANA_SERVICE -n default --type='json' -p '[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+export GRAFANA_POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=grafana" -o jsonpath="{.items[0].metadata.name}")
+export PROMETHEUS_SERVICE=$(kubectl get services -n monitoring | grep prometheus-kube-prometheus-prometheus | awk '{print $1}')
+kubectl patch svc $PROMETHEUS_SERVICE -n monitoring --type='json' -p '[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+export PROMETHEUS_PORT=$(kubectl get services $PROMETHEUS_SERVICE -n monitoring -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+export CONTROL_IP=$(kubectl get nodes -o wide | grep control-plane | awk '{print $6}')
+export GRAFANA_SVC_PORT=$(kubectl get services -l "app.kubernetes.io/name=grafana" -n default -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+export GRAFANA_HOST="http://$CONTROL_IP:$GRAFANA_SVC_PORT"
+export PROM_HOST="http://$CONTROL_IP:$PROMETHEUS_PORT"
+echo $GRAFANA_HOST
+echo $PROM_HOST
+
+
+
+#Prometheus various commands
+
+        #modify prometheus with the things we need, namely metrics-server and cAdvisor
+        kubectl --namespace default get pods -l "release=prometheus"
+
+        #can also install lighter version of prometheus
+
+        helm install -f /home/agennuso/Boh/MetricsPrep/helm_values_prometheus.yaml prometheus prometheus-community/prometheus
+
+        ## if it asks for monitoring namespace
+        kubectl --namespace default get pods -l "release=prometheus"
+        kubectl edit configmap prometheus-server -n default
+        #change to nodeport or maybe edit the service it self if possible
+
+
+        #take METRICS_SERVER_ENDPOINT AND PUT IT INSIDE OF TARGETS IN PROMETHEUS
+        chmod +x /home/agennuso/prometheus/prometheus-2.50.1.linux-amd64/generate_prometheus.sh
+        /home/agennuso/prometheus/prometheus-2.50.1.linux-amd64/generate_prometheus.sh
+        kubectl apply -f /home/agennuso/prometheus/prometheus-2.50.1.linux-amd64/prometheus.yml
+
+
+        #make grafana NodePort
+        export GRAFANA_SERVICE=$(kubectl get services -n default | grep grafana | awk '{print $1}')
+        kubectl patch svc $GRAFANA_SERVICE -n default --type='json' -p '[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+
+
+        #on the terminal on which we want to portforward
+        export GRAFANA_POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=grafana" -o jsonpath="{.items[0].metadata.name}")
+        kubectl --namespace default port-forward $GRAFANA_POD_NAME 9091
+
+        #for stack
+        export PROMETHEUS_SERVICE=$(kubectl get services -n monitoring | grep prometheus-kube-prometheus-prometheus | awk '{print $1}')
+        kubectl patch svc $PROMETHEUS_SERVICE -n monitoring --type='json' -p '[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+        export PROMETHEUS_PORT=$(kubectl get services $PROMETHEUS_SERVICE -n monitoring -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+
+
+
+
+        #for helm normal
+        # export PROMETHEUS_SERVICE=$(kubectl get services -n default | grep prometheus-server | awk '{print $1}')
+        #OR
+        export PROMETHEUS_SERVICE=$(kubectl get services -n monitoring | grep prometheus-server | awk '{print $1}')
+
+        kubectl patch svc $PROMETHEUS_SERVICE -n monitoring --type='json' -p '[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+        # export PROMETHEUS_PORT=$(kubectl get services $PROMETHEUS_SERVICE -n default -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+        #OR
+        export PROMETHEUS_PORT=$(kubectl get services $PROMETHEUS_SERVICE -n monitoring -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+
+
+
+        #
+        export CONTROL_IP=$(kubectl get nodes -o wide | grep control-plane | awk '{print $6}')
+        export GRAFANA_SVC_PORT=$(kubectl get services -l "app.kubernetes.io/name=grafana" -n default -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+        export GRAFANA_HOST="http://$CONTROL_IP:$GRAFANA_SVC_PORT"
+        export PROM_HOST="http://$CONTROL_IP:$PROMETHEUS_PORT"
+
+        echo $GRAFANA_HOST
+        echo $PROM_HOST
+
+#GRAFANA LOGIN
+admin
+prom-operator
+
+#IF NOT WORKING RESET PWF
+kubectl exec --namespace default -it $GRAFANA_POD_NAME grafana cli admin reset-admin-password promOperator
+
+
+
+#deploy ISTIO
+#if not downloaded
+curl -L https://istio.io/downloadIstio | sh -
+
+#if downloaded
+cd /home/agennuso/Boh/Istio_Mesh/istio-1.21.0
+export PATH=$PWD/bin:$PATH
+
+#to install istio
+# istioctl install --set profile=demo -y
+istioctl install --set profile=default -y
+
+#in case of uninstall
+istioctl uninstall --purge
+
+#inject Envoy automatically on each app deployed in default
+kubectl label namespace default istio-injection=enabled
+
+#if want to apply to everything but there are warnings
+kubectl rollout restart deployment
+
+#to apply prometheus scraping for istio
+kubectl apply -f prometheus-scrape-istio.yaml
+
+#sample app for istio
+kubectl apply -f samples/bookinfo/platform/kube/bookinfo.yaml
+
+#create a gateway for Ingress to the application
+kubectl apply -f samples/bookinfo/networking/bookinfo-gateway.yaml
+
+
+#to check that everything correct
+istioctl analyze
+
+#since we don't have an external LoadBalancer
+export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+export SECURE_INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
+export INGRESS_HOST=$(kubectl get po -l istio=ingressgateway -n istio-system -o jsonpath='{.items[0].status.hostIP}')
+export GATEWAY_URL="http://$INGRESS_HOST:$INGRESS_PORT"
+
+#in our case to access product page
+export PRODUCTPAGE_URL="$GATEWAY_URL/productpage"
+echo $PRODUCTPAGE_URL
+
+#addons
+kubectl apply -f /home/agennuso/Boh/Istio_Mesh/istio-1.21.0/samples/addons/jaeger.yaml
+kubectl apply -f /home/agennuso/Boh/Istio_Mesh/istio-1.21.0/samples/addons/loki.yaml
+
+
+#DASHBOARD
+cd /home/agennuso/Boh/Istio_Mesh/istio-1.21.0/samples/addons
+kubectl delete -f /home/agennuso/Boh/Istio_Mesh/istio-1.21.0/samples/addons/kiali.yaml
+kubectl apply -f /home/agennuso/Boh/Istio_Mesh/istio-1.21.0/samples/addons/kiali.yaml
+
+
+#to get nodeport
+
+kubectl patch service kiali -n istio-system --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}]'
+export KIALI_PORT=$(kubectl get service kiali -n istio-system -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+export KIALI_URL="http://$CONTROL_IP:$KIALI_PORT"
+kubectl rollout status deployment/kiali -n istio-system
+echo $KIALI_URL
+
+#to access jaeger
+kubectl patch service tracing -n istio-system --type='json' -p='[{"op":"replace","path":"/spec/type","value":"NodePort"}]'
+export JAEGER_PORT=$(kubectl get service tracing -n istio-system -o wide | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+export JAEGER_URL="http://$CONTROL_IP:$JAEGER_PORT"
+echo $JAEGER_URL
+
+#take traces
+for i in $(seq 1 100); do curl -s -o /dev/null "$GATEWAY_URL/productpage"; done
+
+#delete sample BookInfo
+kubectl delete -f samples/bookinfo/platform/kube/bookinfo.yaml
+kubectl delete -f samples/bookinfo/networking/bookinfo-gateway.yaml
+
+#to trace, we have always got to have the gateway with istio from the application
+
+
+#ISTIO TEASTORE TRIALS
+kubectl apply -f https://raw.githubusercontent.com/DescartesResearch/TeaStore/master/examples/kubernetes/teastore-clusterip.yaml
+    #gateways? NOT WORKING FOR NOW
+    kubectl apply -f /home/agennuso/Boh/TeaStore_deploy/teastore-clusterip-gateway.yaml
+
+
+
+
+
+
+
+
+#helm deployment 
+# helm repo add istio https://istio-release.storage.googleapis.com/charts
+# helm repo update
+
+# kubectl create namespace istio-system
+# helm install istio 
+# helm install istio-base istio/base -f  -n istio-system --set defaultRevision=default
+
+# #deploy MPA
+
+echo something
+
+#Login with docker in the middle -ALWAYS USE SUDO
+username: amaterassu17
+pswd: N?B,H^FYd$g5(qq
+
+#where we want to deploy MPA, Control or Worker
+cd /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler
+chmod +x generate_recommender_dockerfile.sh
+./generate_recommender_dockerfile.sh
+cat /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler/pkg/recommender/Dockerfile
+
+#need GO
+tar -zvxf /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler/go1.22.2.linux-amd64.tar.gz --no-same-owner -C /usr/local
+export PATH="$PATH:/usr/local/go/bin"
+source ~/.profile
+go env -w GOFLAGS="-buildvcs=false"
+go mod tidy
+cd /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler/
+go get -d ./....
+go mod tidy
+make build-binary-with-vendor-amd64
+make docker-build-amd64
+cd deploy
+ ./mpa-up.sh
+ 
+ #to check if everything good
+    kubectl get pods -n kube-system
+
+#to undeploy
+cd /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler
+cd deploy
+ ./deploy/mpa-down.sh
+ 
+ 
+ #to check if everything good
+    kubectl get pods -n kube-system
+
+#######
+##RL CONTROLLER PART
+#Example
+cd /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler/examples/
+kubectl create -f ./deploy_x.sh
+./deploy_x_mpa.sh
+
+
+helm upgrade prometheus prometheus-community/kube-prometheus-stack -f helm_values_stack.yaml
+
+#setup Prometheus ENV VARIABLES? Still not well defined
+
+sudo apt install jq
+#export PROM_SECRET=`kubectl get secrets  |grep prometheus-admission |head -n 1|awk '{print $1}'`
+#export PROM_TOKEN=$(kubectl get secret prometheus-prometheus-kube-prometheus-prometheus-tls-assets-0 -o json | jq -r '.data | values[]' | base64 --decode | awk '!/^-----BEGIN CERTIFICATE-----$/ && !/^-----END CERTIFICATE-----$/')
+#export PROM_HOST=`kubectl get services |grep prometheus-kube-prometheus-prometheus |awk '{print $3}'`
+
+
+cd /home/agennuso/Boh/AWARE_mod/aware/rl-controller
+
+pip install -r requirements.txt
+
+#tried with main.py but problem with prometheus.
+REMEMBER SETUP PROMETHEUS, METRICS SERVER AND MPA TO WORK TOGETHER-
+
+
+
+
+python main.py --app_name <app_name> --app_namespace <app_ns> --mpa_name '<mpa_name>' --mpa_namespace <mpa_ns>
+
+#for php-apache
+python main.py --app_name php-apache --app_namespace appex --mpa_name php-apache-mpa --mpa_namespace appex
+
+
+
+
+
+
+
+#on master for synthetic
+sudo apt-get install -y software-properties-common
+sudo apt-get upgrade -y
+
+
+#PROBLEM TO GET GO TO WORK
+cd /home/agennuso/Boh/AWARE_mod/aware/synthetic-app-generator/function_generator
+tar -zvxf go1.22.1.linux-amd64.tar.gz --no-same-owner -C /usr/local
+export PATH="$PATH:/usr/local/go/bin"
+source ~/.profile
+go env -w GOFLAGS="-buildvcs=false"
+go build .
+./synthetic-function-generator generate -f ../function_segments --save --max-roll=1 --num-funcs=11
+
+
+cd /home/agennuso/aware/synthetic-app-generator
+sudo apt install -y nodejs
+sudo apt install -y npm
+npm install -g n
+n latest
+
+#then create actions in zip
+#BEWARE TAKES A SHIT TON OF TIME
+#exit and re enter node to reset npm semver
+cd script
+
+npm install -g js-image-generator
+npm install -g sharp
+npm install -g mathjs
+npm install -g json-to-pretty-yaml
+npm install -g lorem-ipsum
+
+./create-action-zip-files.sh
+also npm buggy
+
+
+#download openwisk
+cd /home/usr.../
+git clone https://github.com/apache/openwhisk.git openwhisk
+cd openwhisk
+cd tools/ubuntu-setup
+./all.sh
+
+
+
+
+
+
+
+
+kubectl debug -it metrics-server-c6d66bf44-lfs7g --image=busybox:1.28  -n kube-system
+
+
+
+kubectl create -f /home/agennuso/curlbox.yaml
+kubectl run mycurlpod --image=curlimages/curl -i --tty -- sh
+#if exit
+kubectl attach mycurlpod -c mycurlpod -i -t
+
+
+#run php-apache (NO MPA)
+cd /home/agennuso/Boh/AWARE_mod/aware/multidimensional-pod-autoscaler/deploy/examples
+kubectl apply -f php-apache.yaml
+
+#load generator for APP PHP APACHE
+kubectl run -i --tty load-generator --rm --image=busybox --restart=Never -- /bin/sh -c "while sleep 0.001; do wget -q -O- http://php-apache; done"
+#OR 
+kubectl run -i --tty load-generator --rm --image=busybox --restart=Never -- /bin/sh -c "while sleep 0.001; do wget -q -O- http://php-apache.appex.svc.cluster.local:80; done"
+
+
+See why APACHE-SSSS DOesn't work............. '
+
+
+kubectl expose pods mpa-recommender-xxxx --name=mpa-recommender --port=31586
+
+
+
+#to install TeaStore
+#Kubernetes with ClusterIP
+kubectl create -f https://raw.githubusercontent.com/DescartesResearch/TeaStore/master/examples/kubernetes/teastore-clusterip.yaml
+#kubernetes with Ribbon balancer
+kubectl create -f https://raw.githubusercontent.com/DescartesResearch/TeaStore/master/examples/kubernetes/teastore-ribbon.yaml
+export CONTROL_IP=$(kubectl get nodes -o wide | grep control-plane | awk '{print $6}')
+export WEBUI_PORT=$(kubectl get svc -o wide  | tail -n 1 |awk '{print $5}' | cut -d':' -f2 | cut -d'/' -f1)
+export WEBUI_URL="http://$CONTROL_IP:$WEBUI_PORT"
+echo $WEBUI_URL
+
+#LoadGEN
+
+
+
+
+#ADAPTER
+helm install -f /home/agennuso/Boh/MetricsPrep/helm_values_adapter.yaml adapter prometheus-community/prometheus-adapter
+
+#after some minutes this should work 
+kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1
+#should be also checkable from here
+kubectl get apiservices
+
+
+
+#to test if the queries are queired correctly
+cd /home/agennuso/Boh/AWARE_mod/prometheus_check_metrics_query
+pip install -r requirements.txt
+python main.py --metric_name <copy promql from gui> --interval <interval between each call> --
+
+#php-apache
+python main.py --metric_name "rate(container_cpu_usage_seconds_total{container='php-apache'}[1m])" --interval 10
+
+python main.py --metric_name "rate(container_network_receive_bytes_total{namespace='appex'}[1m])" --interval 10
+
+
+
+
+#change kubelet housekeeping metrics exposed refresh rate
+sudo nano /var/lib/kubelet/kubeadm-flags.env
+# Add --housekeeping-interval=3s
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+
+
+
+
+
+
+
+
+///
+
+
+
+
+
+#TEASTORE LOADGEN YANNICK
+#GET 2 NODES EXT, DEPLOY,
+sudo apt update -y
+sudo apt upgrade -y
+#install java?
+sudo apt install default-jre -y
+#on one of the nodes
+#change lua file so that we have the ip of node + teastore port = uri
+export $ip_machine = ...
+java -jar httploadgenerator.jar loadgenerator
+java -jar httploadgenerator.jar director -s 172.16.39.2 -a ./increasingHighIntensity.csv -l ./teastore_buy.lua -o buy_high_jaeger.csv -t 256
+
+java -jar httploadgenerator.jar director -s 172.16.39.2 -a ./increasingLowIntensity.csv -l ./teastore_buy.lua -o buy_low_jaeger.csv -t 256
+
+
+
+
+
+
+
+
+
+
+####KOPF OPERATOR
+#to run
+kopf run ./hooks.py --verbose
+
+
+##Sending post calls to containerized kopf application flask
+
+
+
+
+
+# to build the kopf operator
+sudo docker login -u 'amaterassu17' -p 'N?B,H^FYd$g5(qq'
+docker buildx build -t amaterassu17/mpa-operator:latest --push .
+
+
+#to create it
+kubectl apply -f /home/agennuso/Boh/rl_operator/python_operator/mpa_operator.yaml
+
+
+
+kubectl run mycurlpod --image=curlimages/curl -i --tty -- sh
+
+#to attach again
+kubectl attach mycurlpod -c mycurlpod -i -t
+
+#calls
+curl -X POST http://mpa-operator.default.svc.cluster.local:5000/api/rl-operator/ -H "Content-Type: application/json" -d '{"message": "Ciao"}'
+
+curl -X POST http://localhost:5000/api/rl-operator/ -H "Content-Type: application/json" -d '{"message": "Ciao"}'
+
+
+
+
+
+
+
+
+
+
+
+
+
+##to make prometheus calls with CURL
+curl -X GET http://172.16.39.1:30090/api/v1/query?query='container_cpu_usage_seconds_total'

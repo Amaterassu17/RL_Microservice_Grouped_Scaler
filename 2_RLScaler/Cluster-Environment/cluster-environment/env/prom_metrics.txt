@@ -1,0 +1,120 @@
+100 * sum by (container)(rate(container_cpu_usage_seconds_total{container=~"teastore-.+",node!="CONTROL"}[45s])) 
+/ 
+ignoring(container) group_left 
+  sum(rate(container_cpu_usage_seconds_total{container=~"teastore-.+",node!="CONTROL"}[45s]))
+
+
+
+100 * sum by (container)(rate(container_cpu_usage_seconds_total{container=~"teastore-.+",node!="CONTROL"}[45s])) 
+/ 
+ignoring(container) group_left 
+  sum(rate(container_cpu_usage_seconds_total{node!="CONTROL"}[45s]))
+
+
+
+100 * sum by (container)(container_memory_usage_bytes{container=~"teastore-.+",node!="CONTROL"})
+/ 
+ignoring(container) group_left 
+  sum(container_memory_usage_bytes{node!="CONTROL"})
+
+
+avg_over_time(
+  (
+    (sum by (container) (container_memory_usage_bytes{container=~"<APP-MICROSERVICE>",node!="<CONTROL>"}))
+    /
+    ignoring(container) group_left 
+    sum(container_memory_usage_bytes{node!="<CONTROL>"})
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="memory",node!="<CONTROL>"})
+  )[1m:]
+)
+
+
+//CONSIDERING NUMBER OF NODES 
+
+(100 * sum by (container)(container_memory_usage_bytes{container=~"teastore-.+",node!="chifflot-4.lille.grid5000.fr"})
+/ 
+ignoring(container) group_left 
+  sum(container_memory_usage_bytes{node!="chifflot-4.lille.grid5000.fr"}))
+/
+ignoring (container) group_left count(kube_node_info{node!="chifflot-4.lille.grid5000.fr"})
+
+
+avg_over_time(
+  (
+    (100 * sum by (container) (rate(container_cpu_usage_seconds_total{container=~"teastore-.+",node!="chifflot-4.lille.grid5000.fr"}[1m]))
+    /
+    ignoring(container) group_left 
+    sum(rate(container_cpu_usage_seconds_total{node!="chifflot-4.lille.grid5000.fr"}[1m]))
+    /
+    ignoring (container) group_left count(kube_node_info{node!="chifflot-4.lille.grid5000.fr"})
+  )[45s:1s]
+))
+
+
+100 * avg_over_time(
+  (
+    (sum by (container) (container_memory_usage_bytes{container=~"teastore-.+",node!="chiclet-2.lille.grid5000.fr"}))
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="memory",node!="chiclet-2.lille.grid5000.fr"})
+  )[1m:]
+)
+
+
+
+
+
+
+
+
+
+
+# DEFINITIVE METRICS
+
+
+100 * stddev_over_time(
+  (
+    (sum by (container) (rate(container_cpu_usage_seconds_total{container=~"<APP-MICROSERVICE>",node!="<CONTROL>"}[1m])))
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="cpu",node!="<CONTROL>"})
+  )[1m:]
+)
+
+
+100 * stddev_over_time(
+  (
+    (sum by (container) (container_memory_usage_bytes{container=~"<APP-MICROSERVICE>",node!="<CONTROL>"}))
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="memory",node!="<CONTROL>"})
+  )[1m:]
+)
+
+
+100 * avg_over_time(
+  (
+    (sum by (container) (rate(container_cpu_usage_seconds_total{container=~"<APP-MICROSERVICE>",node!="<CONTROL>"}[1m])))
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="cpu",node!="<CONTROL>"})
+  )[1m:]
+)
+
+100 * avg_over_time(
+  (
+    (sum by (container) (container_memory_usage_bytes{container=~"<APP-MICROSERVICE>",node!="<CONTROL>"}))
+    /
+    ignoring (container) group_left 
+    sum(kube_node_status_capacity{resource="memory",node!="<CONTROL>"})
+  )[1m:]
+)
+
+
+
+
+histogram_quantile(0.95, sum(rate(istio_request_duration_seconds_bucket{reporter="destination", destination_service=~"APP-MICROSERVICE", destination_workload_namespace="your-namespace"}[1m])) by (le, destination_service))
+
+

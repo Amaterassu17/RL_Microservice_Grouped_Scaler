@@ -1,0 +1,415 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+"""Convert an rootfs archive to a bootable disk image with guestfish."""
+
+import os
+import os.path as op
+import sys
+import subprocess
+import platform
+import argparse
+import logging
+import tempfile
+import shutil
+import contextlib
+
+
+logger = logging.getLogger(__name__)
+
+
+tar_options = ["--selinux",
+               "--xattrs",
+               "--xattrs-include=*",
+               "--numeric-owner",
+               "--one-file-system"]
+
+
+@contextlib.contextmanager
+def temporary_directory():
+    """Context manager for tempfile.mkdtemp()."""
+    name = tempfile.mkdtemp()
+    try:
+        yield name
+    finally:
+        shutil.rmtree(name)
+
+
+def which(command):
+    """Locate a command.
+    Snippet from: http://stackoverflow.com/a/377028
+    """
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(command)
+    if fpath:
+        if is_exe(command):
+            return command
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            path = path.strip('"')
+            exe_file = os.path.join(path, command)
+            if is_exe(exe_file):
+                return exe_file
+
+    raise ValueError("Command '%s' not found" % command)
+
+
+def file_type(path):
+    """Get file type."""
+    if not op.exists(path):
+        raise Exception("cannot open '%s' (No such file or directory)" % path)
+    cmd = [which("file"), path]
+    proc = subprocess.Popen(cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            env=os.environ.copy(),
+                            shell=False)
+    output, _ = proc.communicate()
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, ' '.join(cmd))
+    return output.decode('utf-8').split(':')[1].strip()
+
+
+def qemu_convert(disk, output_fmt, output_filename):
+    """Convert the disk image filename to disk image output_filename."""
+    binary = which("qemu-img")
+    cmd = [binary, "convert", "-p", "-O", output_fmt, disk, output_filename]
+    if output_fmt in ("qcow", "qcow2"):
+        cmd.insert(2, "-c")
+    proc = subprocess.Popen(cmd, env=os.environ.copy(), shell=False)
+    proc.communicate()
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, ' '.join(cmd))
+
+
+def run_guestfish_script(disk, script, mount=True, piped_output=False):
+    """Run guestfish script."""
+    args = [which("guestfish"), '-a', disk]
+    if mount:
+        script = "run\nmount /dev/sda1 /\n%s" % script
+    else:
+        script = "run\n%s" % script
+    if piped_output:
+        proc = subprocess.Popen(args,
+                                stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                env=os.environ.copy())
+
+        stdout, _ = proc.communicate(input=script.encode('utf-8'))
+    else:
+        proc = subprocess.Popen(args,
+                                stdin=subprocess.PIPE,
+                                env=os.environ.copy())
+        proc.communicate(input=script.encode('utf-8'))
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, ' '.join(args))
+
+    if piped_output:
+        return stdout.decode('utf-8')
+
+
+def find_mbr():
+    """ ..."""
+    search_paths = (
+        "/usr/share/syslinux/mbr.bin",
+        "/usr/lib/bios/syslinux/mbr.bin",
+        "/usr/lib/syslinux/bios/mbr.bin",
+        "/usr/lib/extlinux/mbr.bin",
+        "/usr/lib/syslinux/mbr.bin",
+        "/usr/lib/syslinux/mbr/mbr.bin",
+        "/usr/lib/EXTLINUX/mbr.bin"
+    )
+    for path in search_paths:
+        if op.exists(path):
+            logger.info("MBR file found at: %s" % path)
+            return path
+    raise Exception("syslinux MBR not found")
+
+
+def get_boot_information(disk):
+    """Looking for boot information"""
+    script_1 = """
+blkid /dev/sda1 | grep ^UUID: | awk '{print $2}'
+ls /boot/ | grep ^vmlinuz | sort -rV | head -n 1
+ls /boot/ | grep ^initr | grep -v fallback | sort -rV | head -n 1
+ls /boot/ | grep ^initr | grep fallback | sort -rV | head -n 1"""
+    logger.info(get_boot_information.__doc__)
+    output_1 = run_guestfish_script(disk, script_1, piped_output=True)
+    try:
+        infos = output_1.strip().split('\n')
+        if len(infos) == 4:
+            uuid, vmlinuz, initrd, initrd_fallback = infos
+            if initrd:
+                return uuid, vmlinuz, initrd
+            else:
+                return uuid, vmlinuz, initrd_fallback
+        else:
+            uuid, vmlinuz, initrd = infos
+            return uuid, vmlinuz, initrd
+    except:
+        raise Exception("Invalid boot information (missing kernel ?)")
+
+
+def generate_fstab(disk, uuid, filesystem_type):
+    """Generate /etc/fstab file"""
+    logger.info("Generating /etc/fstab")
+    script = """
+write /etc/fstab "# /etc/fstab: static file system information.\\n"
+write-append  /etc/fstab "# Generated by kameleon-helpers.\\n\\n"
+write-append /etc/fstab "UUID=%s\\t/\\t%s\\tdefaults\\t0\\t1\\n"
+""" % (uuid, filesystem_type)
+    run_guestfish_script(disk, script)
+
+
+def install_bootloader(disk, mbr, append, uefi):
+    """Install a bootloader"""
+    uuid, vmlinuz, initrd = get_boot_information(disk)
+    logger.info("Root partition UUID: %s" % uuid)
+    logger.info("Kernel image: /boot/%s" % vmlinuz)
+    logger.info("Initrd image: /boot/%s" % initrd)
+    if uefi:
+       logger.info("Install UEFI bootloader")
+       logger.info("Generate grub.cfg")
+       grub_cfg_file = open("./grub.cfg", "w")
+       grub_cfg_file.write("""
+set default=1
+set timeout=0
+insmod part_gpt
+insmod ext2
+set root=(hd0,gpt1)
+menuentry 'Boot Linux' {
+linux /boot/%s ro root=UUID=%s %s
+initrd /boot/%s
+}
+""" % (vmlinuz, uuid, append, initrd))
+       grub_cfg_file.close()
+
+       logger.info("Generate grubaa64.efi")
+       if platform.machine() == "aarch64":
+           grub_arch = "arm64-efi"
+           boot_efi = "bootaa64.efi"
+       elif platform.machine() == "x86_64":
+           grub_arch = "x86_64-efi"
+           boot_efi = "bootx64.efi"
+       else:
+           # dumb guess
+           grub_arch = platform.machine() + "-efi"
+           grub_efi = "grub" + platform.machine() + ".efi"
+       cmd = ["grub-mkstandalone", "-o", "./" + boot_efi, "-O", grub_arch, "/boot/grub/grub.cfg=./grub.cfg"]
+       proc = subprocess.Popen(cmd, env=os.environ.copy(), shell=False)
+       proc.communicate()
+       if proc.returncode:
+           raise subprocess.CalledProcessError(proc.returncode, ' '.join(cmd))
+       logger.info("Install UEFI bootloader")
+       script = """
+echo "[guestfish] Mount EFI partition"
+mount /dev/sda2 /boot/efi/
+mkdir-p /boot/efi/EFI/BOOT
+echo "[guestfish] Copy grub to the EFI partition"
+upload ./%s /boot/efi/EFI/BOOT/%s
+""" % (boot_efi, boot_efi.upper())
+    else:
+       logger.info("Install MBR bootloader")
+       mbr_path = mbr or find_mbr()
+       mbr_path = op.abspath(mbr_path)
+       script = """
+echo "[guestfish] Upload the master boot record"
+upload %s /boot/mbr.bin
+
+echo "[guestfish] Generate /boot/syslinux.cfg"
+write /boot/syslinux.cfg "DEFAULT linux\\n"
+write-append /boot/syslinux.cfg "LABEL linux\\n"
+write-append /boot/syslinux.cfg "SAY Booting the kernel\\n"
+write-append /boot/syslinux.cfg "KERNEL /boot/%s\\n"
+write-append /boot/syslinux.cfg "INITRD /boot/%s\\n"
+write-append /boot/syslinux.cfg "APPEND ro root=UUID=%s %s\\n"
+
+echo "[guestfish] Put the MBR into the boot sector"
+copy-file-to-device /boot/mbr.bin /dev/sda size:440
+
+echo "[guestfish] Install extlinux on the first partition"
+extlinux /boot
+
+echo "[guestfish] Set the first partition as bootable"
+part-set-bootable /dev/sda 1 true
+""" % (mbr_path, vmlinuz, initrd, uuid, append)
+    logger.info("Generate empty fstab")
+    script += """
+write /etc/fstab "# UNCONFIGURED FSTAB FOR BASE SYSTEM\\n"
+chmod 0755 /
+"""
+    run_guestfish_script(disk, script)
+    return uuid, vmlinuz, initrd
+
+
+def create_disk(input_, output_filename, fmt, size, filesystem, uefi, verbose):
+    """Make a disk image from a tar archive or files."""
+    # create empty disk
+    logger.info("Creating an empty disk image")
+    qemu_img = which("qemu-img")
+    cmd = [qemu_img, "create", "-f", fmt, output_filename, size, "-q"]
+    proc = subprocess.Popen(cmd, env=os.environ.copy(), shell=False)
+    proc.communicate()
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, ' '.join(cmd))
+
+    additional_mount_option = ""
+    if uefi:
+        # partition disk with UEFI and create the filesystem
+        script = """
+echo "[guestfish] Create new UEFI partition table on /dev/sda"
+part-init /dev/sda efi
+echo "[guestfish] Create system partition /dev/sda1"
+part-add /dev/sda p 1050624 -64
+echo "[guestfish] Create {filesystem} filesystem on /dev/sda1"
+mkfs {filesystem} /dev/sda1
+echo "[guestfish] Create EFI partition /dev/sda2"
+part-add /dev/sda p 2048 1050623
+echo "[guestfish] Set the EFI partition type to /dev/sda2"
+part-set-gpt-type /dev/sda 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+echo "[guestfish] Create FAT filesystem on /dev/sda2"
+mkfs vfat /dev/sda2
+mount /dev/sda1 /
+mkdir-p /boot/efi
+""".format(filesystem=filesystem)
+        additional_mount_option = "-m /dev/sda2:/boot/efi/"
+    else:
+        # Fix syslinux 6.03 compat for ext4 64bit, see:
+        # http://www.syslinux.org/wiki/index.php?title=Filesystem#ext
+        mkfs_options = ""
+        if "ext4" in filesystem:
+            mkfs_options = "features:^64bit"
+        # partition disk with MBR and create the filesystem
+        script = """
+echo "[guestfish] Create new MBR partition table on /dev/sda"
+part-disk /dev/sda mbr
+echo "[guestfish] Create {filesystem} filesystem on /dev/sda1"
+mkfs {filesystem} /dev/sda1 {mkfs_options}
+""".format(filesystem=filesystem, mkfs_options=mkfs_options)
+    run_guestfish_script(output_filename, script, mount=False)
+
+    # Fill disk with our data
+    logger.info("Copying data in the disk image")
+    input_type = file_type(input_).lower()
+
+    make_tar_cmd = ""
+    if "xz compressed data" in input_type:
+        make_tar_cmd = "%s %s" % (which("xzcat"), input_)
+    elif "bzip2 compressed data" in input_type:
+        make_tar_cmd = "%s %s" % (which("bzcat"), input_)
+    elif "gzip compressed data" in input_type:
+        make_tar_cmd = "%s %s" % (which("zcat"), input_)
+    elif "zstandard compressed data" in input_type:
+        make_tar_cmd = "%s %s" % (which("zstdcat"), input_)
+    elif "directory" in input_type:
+        excludes = ['dev/*', 'proc/*', 'sys/*', 'tmp/*', 'run/*',
+                    '/mnt/*']
+        tar_options_str = ' '.join(tar_options +
+                                   ['--exclude="%s"' % s for s in excludes])
+        make_tar_cmd = '%s -cf - %s -C %s $(cd %s; ls -A)' % \
+            (which("tar"), tar_options_str, input_, input_)
+
+    if make_tar_cmd:
+        cmd = "%s | %s -a %s -m /dev/sda1:/ %s tar-in - /" % \
+            (make_tar_cmd, which("guestfish"), output_filename, additional_mount_option)
+    else:
+        cmd = "%s -a %s -m /dev/sda1:/ %s tar-in %s /" % \
+            (which("guestfish"), output_filename, additional_mount_option, input_)
+    logger.info(cmd)
+    proc = subprocess.Popen(cmd, env=os.environ.copy(), shell=True)
+    proc.communicate()
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def create_appliance(args):
+    """Convert disk to another format."""
+    input_ = op.abspath(args.input)
+    output = op.abspath(args.output)
+    temp_filename = next(tempfile._get_candidate_names())
+    temp_file = op.abspath(".%s" % temp_filename)
+    output_fmt = args.format.lower()
+    output_filename = "%s.%s" % (output, output_fmt)
+
+    os.environ['LIBGUESTFS_CACHEDIR'] = os.getcwd()
+    if args.verbose:
+        os.environ['LIBGUESTFS_DEBUG'] = '1'
+
+    create_disk(input_,
+                temp_file,
+                args.format,
+                args.size,
+                args.filesystem,
+                args.uefi,
+                args.verbose)
+    logger.info("Installing bootloader")
+    uuid, _, _ = install_bootloader(temp_file,
+                                    args.extlinux_mbr,
+                                    args.append,
+                                    args.uefi)
+    generate_fstab(temp_file, uuid, args.filesystem)
+
+    logger.info("Exporting appliance to %s" % output_filename)
+    if output_fmt == "qcow2" and args.compress:
+        qemu_convert(temp_file, output_fmt, output_filename)
+        os.remove(temp_file) if os.path.exists(temp_file) else None
+    else:
+        shutil.move(temp_file, output_filename)
+
+
+if __name__ == '__main__':
+    allowed_formats = ('qcow', 'qcow2', 'qed', 'vdi', 'raw', 'vmdk')
+    allowed_formats_help = 'Allowed values are ' + ', '.join(allowed_formats)
+
+    allowed_levels = ["%d" % i for i in range(1, 10)] + ["best", "fast"]
+    allowed_levels_helps = 'Allowed values are ' + ', '.join(allowed_levels)
+
+    parser = argparse.ArgumentParser(
+        description=sys.modules[__name__].__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('input', action="store",
+                        help='input root filesystem in directory (chroot) '
+                             'or a tarball (conpressed or not)')
+    parser.add_argument('-F', '--format', action="store", type=str,
+                        help=('Choose the output disk image format. %s' %
+                              allowed_formats_help), default='qcow2')
+    parser.add_argument('-t', '--filesystem', action="store", type=str,
+                        help='Choose the output filesystem type.',
+                        default="ext2")
+    parser.add_argument('-s', '--size', action="store", type=str,
+                        help='choose the size of the output image',
+                        default="10G")
+    parser.add_argument('-o', '--output', action="store", type=str,
+                        help='Output filename (without file extension)',
+                        required=True, metavar='filename')
+    parser.add_argument('--uefi', action="store_true", default=False,
+                        help='Create an UEFI partition table')
+    parser.add_argument('--extlinux-mbr', action="store", type=str,
+                        help='Extlinux MBR', metavar='')
+    parser.add_argument('--append', action="store", type=str,
+                        default="",
+                        help='Additional kernel args', metavar='')
+    parser.add_argument('--verbose', action="store_true", default=False,
+                        help='Enable very verbose messages')
+    parser.add_argument('--compress', action="store_true", default=False,
+                        help='compress the output file (Only qcow2).')
+    log_format = '%(levelname)s: %(message)s'
+    level = logging.INFO
+    try:
+        args = parser.parse_args()
+        if args.verbose:
+            level = logging.DEBUG
+
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter(log_format))
+
+        logger.setLevel(level)
+        logger.addHandler(handler)
+        create_appliance(args)
+    except Exception as exc:
+        sys.stderr.write(u"\nError: %s\nTry to execute this script with "
+                         "the '--verbose' option to get more details" % exc)
+        sys.exit(1)

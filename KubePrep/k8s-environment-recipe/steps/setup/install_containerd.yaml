@@ -1,0 +1,45 @@
+- install-prerequisites:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends apt-transport-https ca-certificates curl
+
+- add-docker-apt-signing-key:
+  - test:
+    - exec_in: test ! -d /etc/apt/keyrings
+    - group:
+      - exec_in: mkdir -p -m 755 /etc/apt/keyrings
+  - test:
+    - exec_in: test ! -f /etc/apt/keyrings/docker.gpg
+    - group:
+      - exec_in: curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      - exec_in: chmod a+r /etc/apt/keyrings/docker.gpg
+
+- add-docker-apt-configuration:
+  - test:
+    - exec_in: test ! -f /etc/apt/sources.list.d/docker.list 
+    - group:
+      - exec_in: echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
+
+- install-containerd:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends containerd.io=$${CONTAINERD_VERSION}
+
+- install-cni-plugins:
+  - exec_in: mkdir -p /opt/cni/bin
+  - download_file_in:
+    - https://github.com/containernetworking/plugins/releases/download/v1.3.0/cni-plugins-linux-amd64-v1.3.0.tgz
+    - $KAMELEON_WORKDIR/cni-plugins-linux-amd64.tgz
+  - exec_in: tar Cxzvf /opt/cni/bin $KAMELEON_WORKDIR/cni-plugins-linux-amd64.tgz && rm -rf $KAMELEON_WORKDIR/cni-plugins-linux-amd64.tgz
+
+- configure-network:
+  - exec_in: echo "br_netfilter" >> /etc/modules
+  - exec_in: sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+  - append_in:
+    - /etc/sysctl.conf
+    - |
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.bridge.bridge-nf-call-iptables = 1
+
+- configure-containerd:
+  - exec_in: containerd config default > /etc/containerd/config.toml
+  - exec_in: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+

@@ -1,0 +1,11 @@
+- install-prerequisites:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends python3-yaml
+
+- install-helm:
+  - download_file_in:
+    - https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    - $KAMELEON_WORKDIR/get-helm-3
+  - exec_in: chmod +x $KAMELEON_WORKDIR/get-helm-3
+  - exec_in: DESIRED_VERSION=v3.13.2 $KAMELEON_WORKDIR/get-helm-3
+  - exec_in: rm -f $KAMELEON_WORKDIR/get-helm-3

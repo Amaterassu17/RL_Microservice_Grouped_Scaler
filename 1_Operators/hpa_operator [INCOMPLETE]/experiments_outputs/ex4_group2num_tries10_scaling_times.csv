@@ -1,0 +1,6 @@
+Microservice | Replicas,AvgTime, MinTime, MaxTime
+teastore-recommender| R1,0.0,0,0
+teastore-recommender| R2,0.0,0,0
+teastore-recommender| R5,0.0,0,0
+teastore-recommender| R10,0.0,0,0
+teastore-recommender| R20,0.0,0,0

@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mpa-operator-account
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mpa-operator-role-complete
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - endpoints
+  - persistentvolumeclaims
+  - events
+  - configmaps
+  - namespaces
+  verbs:
+  - '*'
+
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  - deployments/scale
+  - deployments/finalizers
+  verbs:
+  - '*'
+
+# # - apiGroups:
+# #   - admissionregistration.k8s.io
+# #   resources:
+# #   - validatingwebhookconfigurations
+# #   - mutatingwebhookconfigurations
+# #   verbs:
+# #   - create
+# #   - patch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mpa-operator-complete-binding
+subjects:
+- kind: ServiceAccount
+  name: mpa-operator-account
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: mpa-operator-role-complete
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mpa-operator-mpa-role
+rules:
+- apiGroups:
+  - "autoscaling.k8s.io"
+  resources:
+  - multidimensionalpodautoscalers
+  verbs:
+  - '*'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mpa-operator-mpa-binding
+subjects:
+- kind: ServiceAccount
+  name: mpa-operator-account
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: mpa-operator-mpa-role
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+---
+
+
+#to use debug
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mpa-script-pv
+  # finalizers: []
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadOnlyMany
+  hostPath:
+    path: /home/agennuso/Boh/rl_operator/pvc_debug  # Replace this with the path to your local script directory
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mpa-script-pvc
+  # finalizers: []
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mpa-operator
+  # finalizers: []
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mpa-operator
+  template:
+    metadata:
+      labels:
+        app: mpa-operator
+    spec:
+      serviceAccountName: mpa-operator-account
+      containers:
+      - name: mpa-operator
+        image: gricad-registry.univ-grenoble-alpes.fr/microserviceserods/aware-deployment-grid5k/rl-operator:dev
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: mpa-script
+          mountPath: /src
+      imagePullSecrets:
+      - name: gricad-registry
+
+      volumes:
+      - name: mpa-script
+        persistentVolumeClaim:
+          claimName: mpa-script-pvc
+      
+      
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mpa-operator
+spec:
+  selector:
+    app: mpa-operator
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+  type: NodePort
+
+
+---
+
+
+

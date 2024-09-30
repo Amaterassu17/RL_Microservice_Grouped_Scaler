@@ -1,0 +1,2 @@
+20;[[1,2,5,10]]
+teastore-webui,teastore-persistence,teastore-recommender

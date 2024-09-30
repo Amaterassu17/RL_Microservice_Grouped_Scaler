@@ -1,0 +1,24 @@
+1-10-[1,2,3,5,10]
+teastore-webui
+
+2-10-[1,2,3,5,10]
+teastore-webui,teastore-persistence
+
+3-10-[1,2,3,5,10]
+teastore-webui,teastore-persistence,teastore-recommender
+
+4-10-[1,2,3,5,10]
+teastore-persistence
+
+5-10-[1,2,3,5,10]
+teastore-persistence,teastore-recommender
+
+6-10-[1,2,3,5,10]
+teastore-webui
+tea-store-persistence
+tea-store-recommender
+
+[experiment_id]-[number_of_tries]-[[n_replicas1,n_replicas2,...,n_replicasN]]
+[microservice1,microservice2,...,microserviceN]
+[microservice1,microservice2,...,microserviceN]
+... other groups

@@ -1,0 +1,9 @@
+- create-disable-swap-postinstall:
+  - exec_local: mkdir -p $${grid5000_environment_export_additional_postinstall_dir}
+  - exec_local: |
+      cat <<EOF > $${grid5000_environment_export_additional_postinstall_dir}/$${grid5000_environment_export_additional_postinstall_script}
+        #!/usr/bin/bash
+        sed -i '/ swap /d' \$KADEPLOY_ENV_EXTRACTION_DIR/etc/fstab
+      EOF
+  - exec_local: chmod +x $${grid5000_environment_export_additional_postinstall_dir}/$${grid5000_environment_export_additional_postinstall_script}
+

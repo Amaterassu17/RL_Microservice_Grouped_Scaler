@@ -1,0 +1,25 @@
+- install-prerequisites:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends apt-transport-https ca-certificates curl
+
+- add-docker-apt-signing-key:
+  - test:
+    - exec_in: test ! -d /etc/apt/keyrings
+    - group:
+      - exec_in: mkdir -p -m 755 /etc/apt/keyrings
+  - test:
+    - exec_in: test ! -f /etc/apt/keyrings/docker.gpg
+    - group:
+      - exec_in: curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      - exec_in: chmod a+r /etc/apt/keyrings/docker.gpg
+
+- add-docker-apt-configuration:
+  - test:
+    - exec_in: test ! -f /etc/apt/sources.list.d/docker.list 
+    - group:
+      - exec_in: echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
+
+- install-docker:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends docker-ce=$${DOCKER_VERSION} docker-ce-cli=$${DOCKER_VERSION} docker-buildx-plugin docker-compose-plugin
+  - exec_in: apt-mark hold docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin

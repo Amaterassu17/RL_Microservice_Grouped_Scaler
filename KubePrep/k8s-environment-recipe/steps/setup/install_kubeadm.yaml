@@ -1,0 +1,20 @@
+- install-prerequisites:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends apt-transport-https ca-certificates curl python3-kubernetes
+
+- add-k8s-apt-signing-key:
+  - exec_in: mkdir -p -m 755 /etc/apt/keyrings
+  - exec_in: curl -fsSL https://pkgs.k8s.io/core:/stable:/v$${KUBEADM_VERSION}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- add-k8s-apt-configuration:
+  - exec_in: echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$${KUBEADM_VERSION}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+
+- install-kubeadmin:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends kubelet kubeadm kubectl
+  - exec_in: apt-mark hold kubelet kubeadm kubectl
+
+- enable-kubectl-autocompletion:
+  - exec_in: mkdir /etc/bash_completion.d
+  - exec_in: kubectl completion bash > /etc/bash_completion.d/kubectl
+  - exec_in: chmod a+r /etc/bash_completion.d/kubectl

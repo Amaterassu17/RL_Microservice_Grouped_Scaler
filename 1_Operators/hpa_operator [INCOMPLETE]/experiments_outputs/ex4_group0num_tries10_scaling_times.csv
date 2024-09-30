@@ -1,0 +1,6 @@
+Microservice | Replicas,AvgTime, MinTime, MaxTime
+teastore-webui| R1,0.0,0,0
+teastore-webui| R2,0.0,0,0
+teastore-webui| R5,0.0,0,0
+teastore-webui| R10,0.0,0,0
+teastore-webui| R20,0.0,0,0

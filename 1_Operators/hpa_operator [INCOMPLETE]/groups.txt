@@ -1,0 +1,3 @@
+teastore-webui
+teastore-auth,teastore-image
+teastore-recommender,teastore-persistence

@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mpa-operator-account
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mpa-operator-role-complete
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - endpoints
+  - persistentvolumeclaims
+  - events
+  - configmaps
+  - namespaces
+  verbs:
+  - '*'
+
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  - deployments/scale
+  - deployments/finalizers
+  verbs:
+  - '*'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mpa-operator-complete-binding
+subjects:
+- kind: ServiceAccount
+  name: mpa-operator-account
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: mpa-operator-role-complete
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mpa-operator
+  # finalizers: []
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mpa-operator
+  template:
+    metadata:
+      labels:
+        app: mpa-operator
+    spec:
+      serviceAccountName: mpa-operator-account
+      containers:
+      - name: mpa-operator
+        image: gricad-registry.univ-grenoble-alpes.fr/microserviceserods/aware-deployment-grid5k/rl-operator:stable
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+      imagePullSecrets:
+      - name: gricad-registry
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mpa-operator
+spec:
+  selector:
+    app: mpa-operator
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+  type: NodePort
+
+
+---
+
+
+

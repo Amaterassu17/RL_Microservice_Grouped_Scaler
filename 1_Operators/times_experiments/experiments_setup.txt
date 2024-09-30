@@ -1,0 +1,14 @@
+1-10-[1,2,3,5,10]
+teastore-webui
+
+1-10-[1,2,3,5,10]
+teastore-webui,teastore-persistence
+
+1-10-[1,2,3,5,10]
+teastore-webui,teastore-persistence,teastore-db
+
+
+1-10-[1,2,3,5,10]
+teastore-webui
+teastore-persistence
+teastore-image

@@ -1,0 +1,6 @@
+# Install chrony for synchronising time in Linux server (required for Prometheus)
+# Install nfs-common for accessing NFS servers as PersistentVolume
+- install-prerequisites:
+  - apt-get_in: update
+  - apt-get_in: install --no-install-recommends chrony nfs-common
+
